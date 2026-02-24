@@ -1087,7 +1087,7 @@ function sendSelectedWA() {
   
   console.log("Links created:", links.length);
   
-  // Create popup with auto-send
+  // Create popup for WhatsApp sender
   const popup = window.open("", "_blank", "width=500,height=450");
   popup.document.write(`
     <html><head><title>WhatsApp Auto-Sender</title>
@@ -1097,9 +1097,7 @@ function sendSelectedWA() {
       .ctrl{padding:10px 20px;margin:5px;cursor:pointer;border:none;border-radius:5px;color:white}
       .start{background:#4f46e5}.stop{background:#ef4444}
       #status{font-size:16px;margin:15px 0;color:#4f46e5;font-weight:bold}
-    </style>
-    </head>
-    <body>
+    </style></head><body>
       <h2>📱 WhatsApp Auto-Sender</h2>
       <p>${links.length} students with phones</p>
       <div id="status">Ready - Click Start</div>
