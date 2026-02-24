@@ -5,6 +5,39 @@
 // CONFIG: Your Google Apps Script Web App URL
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbxnaSTYPb8mvpo-OGN01fM_at35RRfzquYq2d7D3ANcYZ4CQeIdLjgGC9KiQ3n6zfflaw/exec";
 
+// Column mapping - match your exact Google Sheet headers
+const COLS = {
+  ROLL: "Roll No.",
+  CLASS: "Class",
+  NAME: "Student Name",
+  FATHER: "Father Name",
+  PHONE: "Mobile",
+  EMAIL: "Email",
+  ADDRESS: "Address",
+  DOB: "Date of Birth",
+  ADMISSION: "Admission Date",
+  PREV_BAL: "Balance Upto Dec 2025",
+  TUITION: "Fee Dec-March",
+  VAN: "Van Fee Upto March",
+  OTHER: "Ot (Exam-200,R-Card-200)",
+  TOTAL: "Total",
+  REC: "Rec.",
+  BAL: "Balance",
+  ROUTE: "Route No.",
+  PICKUP: "Pickup Point",
+  LAST_PAY: "Last Payment Date",
+  REMINDER: "Last Reminder",
+  RECEIPT: "Receipt No."
+};
+
+// Also check old column names for backward compatibility
+const COLS_OLD = {
+  VAN: "Van\nFee Upto\nMarch",
+  TUITION: "Fee\nDec. to\nMarch",
+  OTHER: "Ot\nExam-200\nR-Card-200",
+  PREV_BAL: "Balance\nUpto\nDec 2025"
+};
+
 // Sheet names
 const SHEETS = {
   STUDENTS: "Sheet1",
@@ -15,10 +48,12 @@ const SHEETS = {
 
 // Global state
 let students = [];
+let transactions = [];
 let currentSort = { field: null, asc: true };
 let CURRENT_STUDENT = null;
 let DAY_IN = 0;
 let DAY_OUT = 0;
+let receiptCounter = 0;
 
 // ============================================
 // API Functions (Google Apps Script)
@@ -85,11 +120,68 @@ function showProgress(percent) {
 async function refreshData() {
   showProgress(50);
   students = await gasGet(SHEETS.STUDENTS);
+  transactions = await gasGet(SHEETS.TRANSACTIONS);
+  
+  // Generate unique IDs for each student if not present
+  students = students.map((s, index) => {
+    if (!s.id) {
+      s.id = String(index + 1); // Use 1-based index as ID
+    }
+    return s;
+  });
+  
   showProgress(80);
+  
+  // Get last receipt number
+  if (transactions.length > 0) {
+    const receipts = transactions.map(t => Number(t["Receipt No."] || t["Receipt No"] || 0)).filter(r => r > 0);
+    receiptCounter = receipts.length > 0 ? Math.max(...receipts) : 0;
+  }
+  
   renderDashboard();
   renderTable();
   renderVanTable();
   renderClassChips();
+}
+
+// ============================================
+// Mobile Navigation
+// ============================================
+
+function toggleMobileMenu() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  sidebar.classList.toggle('mobile-open');
+  overlay.classList.toggle('active');
+}
+
+function closeMobileMenu() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  sidebar.classList.remove('mobile-open');
+  overlay.classList.remove('active');
+}
+
+// ============================================
+// Mobile Navigation
+// ============================================
+
+function toggleMobileMenu() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  if (sidebar && overlay) {
+    sidebar.classList.toggle('mobile-open');
+    overlay.classList.toggle('active');
+  }
+}
+
+function closeMobileMenu() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  if (sidebar && overlay) {
+    sidebar.classList.remove('mobile-open');
+    overlay.classList.remove('active');
+  }
 }
 
 // ============================================
@@ -106,6 +198,9 @@ function switchView(viewName, btn) {
   const view = document.getElementById(`view-${viewName}`);
   if (view) view.classList.add("active");
   
+  // Close mobile menu
+  closeMobileMenu();
+  
   // Update title
   const titles = {
     dashboard: "Dashboard",
@@ -117,28 +212,77 @@ function switchView(viewName, btn) {
     reports: "Print/Reports"
   };
   document.getElementById("pageTitle").innerText = titles[viewName] || viewName;
+  
+  // Load reports data if needed
+  if (viewName === 'reports') {
+    loadReports();
+  }
 }
 
 // ============================================
 // Dashboard
 // ============================================
 
+// Get value using column mapping - with backward compatibility
+function getVal(obj, colKey) {
+  // Try direct key first
+  let val = obj[colKey];
+  
+  // Try new column name
+  if (!val && COLS[colKey]) {
+    val = obj[COLS[colKey]];
+  }
+  
+  // Try old column name (with newlines)
+  if (!val && COLS_OLD[colKey]) {
+    val = obj[COLS_OLD[colKey]];
+  }
+  
+  return val || "";
+}
+
+// Helper to safely get numeric values - with backward compatibility
+function getNum(obj, colKey) {
+  // Try new column name first
+  let val = obj[colKey] || obj[COLS[colKey]] || "";
+  
+  // If empty, try old column name
+  if (!val && COLS_OLD[colKey]) {
+    val = obj[COLS_OLD[colKey]] || "";
+  }
+  
+  return Number(val) || 0;
+}
+
 function renderDashboard() {
   const totalStudents = students.length;
   let totalCollected = 0;
   let totalPending = 0;
+  let vanStudents = 0;
+  let vanRevenue = 0;
   
   students.forEach(s => {
-    const received = Number(s.Rec) || 0;
-    const total = Number(s.Total) || 0;
-    const balance = Number(s.Bal) || 0;
+    const received = getNum(s, "REC");
+    const total = getNum(s, "TOTAL");
+    const balance = getNum(s, "BAL");
+    const vanFee = getNum(s, "VAN");
     totalCollected += received;
     totalPending += balance;
+    if (vanFee > 0) {
+      vanStudents++;
+      vanRevenue += vanFee;
+    }
   });
   
   document.getElementById("kpiCount").innerText = totalStudents;
   document.getElementById("kpiCollected").innerText = "₹" + totalCollected.toLocaleString();
   document.getElementById("kpiPending").innerText = "₹" + totalPending.toLocaleString();
+  
+  // Update dashboard cards if they exist
+  const kpiVanEl = document.getElementById('kpiVan');
+  const kpiVanRevEl = document.getElementById('kpiVanRevenue');
+  if (kpiVanEl) kpiVanEl.innerText = vanStudents;
+  if (kpiVanRevEl) kpiVanRevEl.innerText = '₹' + vanRevenue.toLocaleString();
 }
 
 // ============================================
@@ -146,14 +290,36 @@ function renderDashboard() {
 // ============================================
 
 function renderClassChips() {
-  const classes = [...new Set(students.map(s => s.Class).filter(Boolean))].sort();
+  const classes = [...new Set(students.map(s => getVal(s, "CLASS")).filter(Boolean))].sort();
   const container = document.getElementById("classChips");
   
   let html = `<div class="chip active" onclick="filterByClass('all', this)">All</div>`;
   classes.forEach(cls => {
     html += `<div class="chip" onclick="filterByClass('${cls}', this)">${cls}</div>`;
   });
+  
+  // Add filter chips for balance status
+  html += `<div class="chip chip-danger" onclick="filterByBalance('pending', this)" title="Show only pending">Due</div>`;
+  html += `<div class="chip chip-success" onclick="filterByBalance('paid', this)" title="Show only paid">Paid</div>`;
+  
   container.innerHTML = html;
+}
+
+let currentBalanceFilter = null;
+
+function filterByBalance(status, chip) {
+  document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+  chip.classList.add("active");
+  currentBalanceFilter = status;
+  renderTable();
+}
+
+function filterByBalanceStatus(s) {
+  if (!currentBalanceFilter || currentBalanceFilter === 'all') return true;
+  const balance = getNum(s, "BAL");
+  if (currentBalanceFilter === 'pending') return balance > 0;
+  if (currentBalanceFilter === 'paid') return balance <= 0;
+  return true;
 }
 
 function filterByClass(cls, chip) {
@@ -165,16 +331,19 @@ function filterByClass(cls, chip) {
 function renderTable(filterClass = null) {
   let data = students;
   
-  // Apply filter
+  // Apply class filter
   if (filterClass && filterClass !== "all") {
-    data = data.filter(s => s.Class === filterClass);
+    data = data.filter(s => getVal(s, "CLASS") === filterClass);
   }
+  
+  // Apply balance filter
+  data = data.filter(filterByBalanceStatus);
   
   // Apply sort
   if (currentSort.field) {
     data = [...data].sort((a, b) => {
-      let va = a[currentSort.field];
-      let vb = b[currentSort.field];
+      let va = getVal(a, currentSort.field.toUpperCase());
+      let vb = getVal(b, currentSort.field.toUpperCase());
       if (typeof va === "string") va = va.toLowerCase();
       if (typeof vb === "string") vb = vb.toLowerCase();
       if (va < vb) return currentSort.asc ? -1 : 1;
@@ -187,24 +356,28 @@ function renderTable(filterClass = null) {
   const search = document.getElementById("searchInput").value.toLowerCase();
   if (search) {
     data = data.filter(s => 
-      (s.Name && s.Name.toLowerCase().includes(search)) ||
-      (s.Roll && String(s.Roll).includes(search)) ||
-      (s.Class && s.Class.toLowerCase().includes(search))
+      (getVal(s, "NAME") && getVal(s, "NAME").toLowerCase().includes(search)) ||
+      (getVal(s, "ROLL") && String(getVal(s, "ROLL")).includes(search)) ||
+      (getVal(s, "CLASS") && getVal(s, "CLASS").toLowerCase().includes(search)) ||
+      (getVal(s, "PHONE") && String(getVal(s, "PHONE")).includes(search))
     );
   }
   
   const tbody = document.getElementById("tableBody");
   tbody.innerHTML = data.map(s => {
-    const total = Number(s.Total) || 0;
-    const balance = Number(s.Bal) || 0;
+    const total = getNum(s, "TOTAL");
+    const balance = getNum(s, "BAL");
+    const phone = getVal(s, "PHONE");
+    const hasPhone = phone && phone.length >= 10;
     return `
       <tr>
-        <td>${s.Roll || ""}</td>
-        <td><strong>${s.Name || ""}</strong></td>
-        <td>${s.Class || ""}</td>
+        <td>${getVal(s, "ROLL")}</td>
+        <td><strong>${getVal(s, "NAME")}</strong></td>
+        <td>${getVal(s, "CLASS")}</td>
         <td>₹${total.toLocaleString()}</td>
         <td style="color: ${balance > 0 ? '#ef4444' : '#10b981'}">₹${balance.toLocaleString()}</td>
-        <td>
+        <td class="action-btns">
+          ${hasPhone ? `<button class="btn-icon btn-wa-sm" onclick="sendWA(${s.id})" title="WhatsApp"><svg viewBox="0 0 24 24" width="16" height="16" fill="#25d366"><path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.711 2.592 2.654-.696c1.029.66 2.028.938 3.267.938 3.188 0 5.768-2.587 5.768-5.771.001-3.185-2.58-5.767-5.769-5.767zm0 10.198c-1.125 0-2.062-.271-2.923-.746l-1.399.367.373-1.359c-.538-.857-.822-1.637-.821-2.693.001-2.441 1.987-4.428 4.428-4.428 2.443 0 4.43 1.986 4.43 4.427 0 2.442-1.985 4.43 4.432z"/></svg></button>` : ''}
           <button class="btn-icon" onclick="openProfile(${s.id})" title="View"><span class="material-icons-round" style="font-size:18px">visibility</span></button>
           <button class="btn-icon" onclick="openModal(${s.id})" title="Edit"><span class="material-icons-round" style="font-size:18px">edit</span></button>
         </td>
@@ -235,21 +408,21 @@ function sortData(field) {
 // ============================================
 
 function renderVanTable() {
-  const vanStudents = students.filter(s => Number(s.Van) > 0);
+  const vanStudents = students.filter(s => getNum(s, "VAN") > 0);
   const tbody = document.getElementById("vanTableBody");
   
   document.getElementById("vanCount").innerText = vanStudents.length;
-  const revenue = vanStudents.reduce((sum, s) => sum + (Number(s.Van) || 0), 0);
+  const revenue = vanStudents.reduce((sum, s) => sum + getNum(s, "VAN"), 0);
   document.getElementById("vanRevenue").innerText = "₹" + revenue.toLocaleString();
   
   tbody.innerHTML = vanStudents.map(s => {
-    const balance = Number(s.Bal) || 0;
+    const balance = getNum(s, "BAL");
     return `
       <tr>
-        <td>${s.Roll || ""}</td>
-        <td><strong>${s.Name || ""}</strong></td>
-        <td>${s.Class || ""}</td>
-        <td>₹${Number(s.Van || 0).toLocaleString()}</td>
+        <td>${getVal(s, "ROLL")}</td>
+        <td><strong>${getVal(s, "NAME")}</strong></td>
+        <td>${getVal(s, "CLASS")}</td>
+        <td>₹${getNum(s, "VAN").toLocaleString()}</td>
         <td style="color: ${balance > 0 ? '#ef4444' : '#10b981'}">₹${balance.toLocaleString()}</td>
         <td>
           <button class="btn-icon" onclick="openProfile(${s.id})" title="View"><span class="material-icons-round" style="font-size:18px">visibility</span></button>
@@ -274,16 +447,21 @@ function openModal(id) {
   } else {
     const s = students.find(st => st.id == id);
     if (s) {
-      document.getElementById("inpRoll").value = s.Roll || "";
-      document.getElementById("inpClass").value = s.Class || "";
-      document.getElementById("inpName").value = s.Name || "";
-      document.getElementById("inpFather").value = s.Father || "";
-      document.getElementById("inpPhone").value = s.Phone || "";
-      document.getElementById("inpTuition").value = s.Tuition || 0;
-      document.getElementById("inpVan").value = s.Van || 0;
-      document.getElementById("inpOther").value = s.Other || 0;
-      document.getElementById("inpPrev").value = s.PrevBal || 0;
-      document.getElementById("inpRec").value = s.Rec || 0;
+      document.getElementById("inpRoll").value = getVal(s, "ROLL");
+      document.getElementById("inpClass").value = getVal(s, "CLASS");
+      document.getElementById("inpName").value = getVal(s, "NAME");
+      document.getElementById("inpFather").value = getVal(s, "FATHER");
+      document.getElementById("inpPhone").value = getVal(s, "PHONE");
+      document.getElementById("inpEmail").value = getVal(s, "EMAIL") || "";
+      document.getElementById("inpAddress").value = getVal(s, "ADDRESS") || "";
+      document.getElementById("inpDOB").value = getVal(s, "DOB") || "";
+      document.getElementById("inpRoute").value = getVal(s, "ROUTE") || "";
+      document.getElementById("inpPickup").value = getVal(s, "PICKUP") || "";
+      document.getElementById("inpTuition").value = getNum(s, "TUITION");
+      document.getElementById("inpVan").value = getNum(s, "VAN");
+      document.getElementById("inpOther").value = getNum(s, "OTHER");
+      document.getElementById("inpPrev").value = getNum(s, "PREV_BAL");
+      document.getElementById("inpRec").value = getNum(s, "REC");
     }
   }
   
@@ -298,22 +476,36 @@ async function handleFormSubmit(e) {
   e.preventDefault();
   
   const id = document.getElementById("studentId").value;
-  const payload = {
-    Roll: document.getElementById("inpRoll").value,
-    Class: document.getElementById("inpClass").value,
-    Name: document.getElementById("inpName").value,
-    Father: document.getElementById("inpFather").value,
-    Phone: document.getElementById("inpPhone").value,
-    Tuition: Number(document.getElementById("inpTuition").value) || 0,
-    Van: Number(document.getElementById("inpVan").value) || 0,
-    Other: Number(document.getElementById("inpOther").value) || 0,
-    PrevBal: Number(document.getElementById("inpPrev").value) || 0,
-    Rec: Number(document.getElementById("inpRec").value) || 0
-  };
+  const payload = {};
+  
+  // Map form fields to actual column names
+  payload[COLS.ROLL] = document.getElementById("inpRoll").value;
+  payload[COLS.CLASS] = document.getElementById("inpClass").value;
+  payload[COLS.NAME] = document.getElementById("inpName").value;
+  payload[COLS.FATHER] = document.getElementById("inpFather").value;
+  payload[COLS.PHONE] = document.getElementById("inpPhone").value;
+  payload[COLS.EMAIL] = document.getElementById("inpEmail").value;
+  payload[COLS.ADDRESS] = document.getElementById("inpAddress").value;
+  payload[COLS.DOB] = document.getElementById("inpDOB").value;
+  payload[COLS.ROUTE] = document.getElementById("inpRoute").value;
+  payload[COLS.PICKUP] = document.getElementById("inpPickup").value;
+  payload[COLS.TUITION] = Number(document.getElementById("inpTuition").value) || 0;
+  payload[COLS.VAN] = Number(document.getElementById("inpVan").value) || 0;
+  payload[COLS.OTHER] = Number(document.getElementById("inpOther").value) || 0;
+  payload[COLS.PREV_BAL] = Number(document.getElementById("inpPrev").value) || 0;
+  payload[COLS.REC] = Number(document.getElementById("inpRec").value) || 0;
   
   // Calculate total and balance
-  payload.Total = payload.PrevBal + payload.Tuition + payload.Van + payload.Other;
-  payload.Bal = payload.Total - payload.Rec;
+  payload[COLS.TOTAL] = payload[COLS.PREV_BAL] + payload[COLS.TUITION] + payload[COLS.VAN] + payload[COLS.OTHER];
+  payload[COLS.BAL] = payload[COLS.TOTAL] - payload[COLS.REC];
+  
+  // Get existing receipt number if editing
+  if (id !== "NEW") {
+    const existing = students.find(st => st.id == id);
+    if (existing) {
+      payload[COLS.RECEIPT] = getVal(existing, "RECEIPT") || "";
+    }
+  }
   
   const btn = document.getElementById("btnSave");
   btn.innerText = "Saving...";
@@ -360,17 +552,17 @@ function openProfile(id) {
   
   CURRENT_STUDENT = s;
   
-  document.getElementById("avatarLetter").innerText = (s.Name || "S").charAt(0).toUpperCase();
-  document.getElementById("pName").innerText = s.Name || "";
-  document.getElementById("pClass").innerText = s.Class || "";
-  document.getElementById("pRoll").innerText = s.Roll || "";
-  document.getElementById("pFather").innerText = s.Father || "-";
-  document.getElementById("pPhone").innerText = s.Phone || "-";
-  document.getElementById("pLastRem").innerText = s.Reminder ? new Date(s.Reminder).toLocaleDateString() : "Never";
+  document.getElementById("avatarLetter").innerText = getVal(s, "NAME").charAt(0).toUpperCase();
+  document.getElementById("pName").innerText = getVal(s, "NAME");
+  document.getElementById("pClass").innerText = getVal(s, "CLASS");
+  document.getElementById("pRoll").innerText = getVal(s, "ROLL");
+  document.getElementById("pFather").innerText = getVal(s, "FATHER") || "-";
+  document.getElementById("pPhone").innerText = getVal(s, "PHONE") || "-";
+  document.getElementById("pLastRem").innerText = getVal(s, "REMINDER") ? new Date(getVal(s, "REMINDER")).toLocaleDateString() : "Never";
   
-  const total = Number(s.Total) || 0;
-  const received = Number(s.Rec) || 0;
-  const balance = Number(s.Bal) || 0;
+  const total = getNum(s, "TOTAL");
+  const received = getNum(s, "REC");
+  const balance = getNum(s, "BAL");
   
   document.getElementById("pTotal").innerText = "₹" + total.toLocaleString();
   document.getElementById("pPaid").innerText = "₹" + received.toLocaleString();
@@ -387,9 +579,12 @@ function closeProfile() {
 function openFeeModal() {
   if (!CURRENT_STUDENT) return;
   
-  document.getElementById("fee_name").innerText = CURRENT_STUDENT.Name;
-  document.getElementById("fee_class").innerText = CURRENT_STUDENT.Class;
-  document.getElementById("fee_bal").innerText = "₹" + (Number(CURRENT_STUDENT.Bal) || 0);
+  // Close profile first
+  closeProfile();
+  
+  document.getElementById("fee_name").innerText = getVal(CURRENT_STUDENT, "NAME");
+  document.getElementById("fee_class").innerText = getVal(CURRENT_STUDENT, "CLASS");
+  document.getElementById("fee_bal").innerText = "₹" + getNum(CURRENT_STUDENT, "BAL");
   document.getElementById("fee_amount").value = "";
   document.getElementById("feeModalOverlay").style.display = "flex";
 }
@@ -404,9 +599,9 @@ async function submitFee() {
   
   const s = CURRENT_STUDENT;
   const txn = {
-    Roll: s.Roll,
-    Name: s.Name,
-    Class: s.ClassVal || s.Class,
+    Roll: getVal(s, "ROLL"),
+    Name: getVal(s, "NAME"),
+    Class: getVal(s, "CLASS"),
     Amount: amount,
     Mode: document.getElementById("fee_mode").value,
     Remarks: document.getElementById("fee_remarks").value
@@ -417,8 +612,8 @@ async function submitFee() {
   
   if (result.success) {
     // Update student record - add to received
-    const newRec = Number(s.Rec || 0) + Number(amount);
-    const newBal = Number(s.Total) - newRec;
+    const newRec = getNum(s, "REC") + Number(amount);
+    const newBal = getNum(s, "TOTAL") - newRec;
     
     await gasPost("update", SHEETS.STUDENTS, { Rec: newRec, Bal: newBal }, s.id);
     
@@ -435,26 +630,111 @@ async function submitFee() {
 }
 
 // ============================================
-// WhatsApp
+// WhatsApp - Individual & Bulk
 // ============================================
 
-function sendWA() {
-  const s = CURRENT_STUDENT;
+function sendWA(id = null) {
+  let s;
+  if (id) {
+    s = students.find(st => st.id == id);
+  } else {
+    s = CURRENT_STUDENT;
+  }
+  
   if (!s) return alert("Error: No student selected.");
   
-  let phone = String(s.Phone || "").replace(/\D/g, "");
+  let phone = String(getVal(s, "PHONE")).replace(/\D/g, "");
   
   if (phone.length < 10) {
-    alert("Invalid Phone Number: '" + s.Phone + "'\nPlease update it in the Edit menu.");
+    alert("Invalid Phone Number: '" + getVal(s, "PHONE") + "'\nPlease update it in the Edit menu.");
     return;
   }
   
   if (phone.length === 10) phone = "91" + phone;
   
-  const msg = `Dear Parent,\n\nThis is a reminder from *K D Memorial School*.\nStudent: *${s.Name}* (Class ${s.Class})\nPending Balance: *₹${s.Bal}*\n\nPlease pay the dues at the earliest.`;
+  const msg = `नमस्ते जी,\n\n*K D Memorial School* की ओर से सादर प्रणाम।\n\nआपके बच्चे *${getVal(s, "NAME")}* (कक्षा ${getVal(s, "CLASS")}) का बकाया ₹${getNum(s, "BAL")} है।\n\nकृपया जल्द से जल्द बकाया राशि का भुगतान करें।\n\nधन्यवाद\nप्रबंधक - K D Memorial School`;
   
   const url = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
   window.open(url, "_blank");
+}
+
+// Bulk WhatsApp to all parents with pending dues
+function sendBulkWA() {
+  console.log("Total students:", students.length);
+  
+  // Get students with pending balance and valid phone
+  const pendingStudents = students.filter(s => {
+    const balance = getNum(s, "BAL");
+    const phoneRaw = getVal(s, "PHONE");
+    const phone = phoneRaw ? String(phoneRaw).replace(/\D/g, "") : "";
+    console.log("Student:", getVal(s, "NAME"), "Balance:", balance, "Phone:", phone);
+    return balance > 0 && phone.length >= 10;
+  });
+  
+  console.log("Pending students with phone:", pendingStudents.length);
+  
+  if (pendingStudents.length === 0) {
+    alert("No students with pending dues and valid phone numbers found!\n\nMake sure:\n1. Students have balance > 0\n2. Phone numbers are saved in the sheet");
+    return;
+  }
+  
+  if (!confirm(`Send WhatsApp reminder to ${pendingStudents.length} parents with pending dues?`)) {
+    return;
+  }
+  
+  let count = 0;
+  pendingStudents.forEach((s, index) => {
+    setTimeout(() => {
+      let phone = String(getVal(s, "PHONE")).replace(/\D/g, "");
+      if (phone.length === 10) phone = "91" + phone;
+      
+      const msg = `Dear Parent,\n\nThis is a reminder from *K D Memorial School*.\nStudent: *${getVal(s, "NAME")}* (Class ${getVal(s, "CLASS")})\nPending Balance: *₹${getNum(s, "BAL")}*\n\nPlease pay the dues at the earliest.`;
+      
+      const url = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+      window.open(url, "_blank");
+      count++;
+      
+      if (index === pendingStudents.length - 1) {
+        alert(`Sent ${count} WhatsApp messages!\n\nNote: Messages open in new tabs. Allow popups if they don't open.`);
+      }
+    }, index * 2000); // 2 second delay between messages
+  });
+}
+
+// Send custom message to selected students
+function sendCustomWA(message) {
+  const pendingStudents = students.filter(s => getNum(s, "BAL") > 0 && getVal(s, "PHONE") && String(getVal(s, "PHONE")).length >= 10);
+  
+  if (pendingStudents.length === 0) {
+    alert("No students with pending dues found!");
+    return;
+  }
+  
+  if (!message) {
+    message = prompt("Enter your custom message (use {name} for student name, {balance} for amount):");
+    if (!message) return;
+  }
+  
+  let count = 0;
+  pendingStudents.forEach((s, index) => {
+    setTimeout(() => {
+      let phone = String(getVal(s, "PHONE")).replace(/\D/g, "");
+      if (phone.length === 10) phone = "91" + phone;
+      
+      let msg = message
+        .replace(/{name}/g, getVal(s, "NAME"))
+        .replace(/{balance}/g, getNum(s, "BAL"))
+        .replace(/{class}/g, getVal(s, "CLASS"));
+      
+      const url = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+      window.open(url, "_blank");
+      count++;
+      
+      if (index === pendingStudents.length - 1) {
+        alert(`Sent ${count} messages!`);
+      }
+    }, index * 2000);
+  });
 }
 
 // ============================================
@@ -674,3 +954,319 @@ window.loadExpenses = loadExpenses;
 window.submitExp = submitExp;
 window.loadStaff = loadStaff;
 window.giveAdv = giveAdv;
+window.loadReports = loadReports;
+window.exportToCSV = exportToCSV;
+window.exportPendingDues = exportPendingDues;
+window.toggleMobileMenu = toggleMobileMenu;
+window.closeMobileMenu = closeMobileMenu;
+window.filterByBalance = filterByBalance;
+window.sendBulkWA = openBulkWAModal;
+window.sendCustomWA = sendCustomWA;
+window.closeBulkWA = closeBulkWA;
+window.toggleWAStudent = toggleWAStudent;
+window.selectAllWA = selectAllWA;
+window.deselectAllWA = deselectAllWA;
+window.filterWASelection = filterWASelection;
+window.sendSelectedWA = sendSelectedWA;
+
+// ============================================
+// Bulk WhatsApp Selection Modal Functions
+// ============================================
+
+let waSelectedStudents = [];
+
+function openBulkWAModal() {
+  // Get all students with valid phone numbers
+  const studentsWithPhone = students.filter(s => {
+    const phone = getVal(s, "PHONE");
+    return phone && String(phone).replace(/\D/g, "").length >= 10;
+  });
+  
+  if (studentsWithPhone.length === 0) {
+    alert("No students with valid phone numbers found!");
+    return;
+  }
+  
+  waSelectedStudents = [];
+  
+  // Build the selection list
+  const listEl = document.getElementById("waSelectionList");
+  listEl.innerHTML = studentsWithPhone.map(s => {
+    const phone = String(getVal(s, "PHONE")).replace(/\D/g, "");
+    const balance = getNum(s, "BAL");
+    return `
+      <div style="display:flex; align-items:center; gap:10px; padding:10px; border-bottom:1px solid #f1f5f9;" class="wa-item">
+        <input type="checkbox" id="wa_${s.id}" value="${s.id}" onchange="toggleWAStudent(${s.id})" style="width:20px; height:20px;">
+        <div style="flex:1;">
+          <strong>${getVal(s, "NAME")}</strong> (${getVal(s, "CLASS")})<br>
+          <span style="color:#64748b; font-size:0.85rem;">${phone} ${balance > 0 ? '- <span style="color:red">Balance: ₹' + balance + '</span>' : '<span style="color:green">Paid</span>'}</span>
+        </div>
+      </div>
+    `;
+  }).join("");
+  
+  document.getElementById("waSelectedCount").innerText = "0";
+  document.getElementById("bulkWAModal").style.display = "flex";
+}
+
+function closeBulkWA() {
+  document.getElementById("bulkWAModal").style.display = "none";
+}
+
+function toggleWAStudent(id) {
+  const checkbox = document.getElementById("wa_" + id);
+  if (checkbox.checked) {
+    waSelectedStudents.push(id);
+  } else {
+    waSelectedStudents = waSelectedStudents.filter(sid => sid !== id);
+  }
+  document.getElementById("waSelectedCount").innerText = waSelectedStudents.length;
+}
+
+function selectAllWA() {
+  waSelectedStudents = [];
+  document.querySelectorAll('#waSelectionList input[type="checkbox"]').forEach(cb => {
+    cb.checked = true;
+    waSelectedStudents.push(Number(cb.value));
+  });
+  document.getElementById("waSelectedCount").innerText = waSelectedStudents.length;
+}
+
+function deselectAllWA() {
+  waSelectedStudents = [];
+  document.querySelectorAll('#waSelectionList input[type="checkbox"]').forEach(cb => cb.checked = false);
+  document.getElementById("waSelectedCount").innerText = "0";
+}
+
+function filterWASelection() {
+  const search = document.getElementById("waSearch").value.toLowerCase();
+  document.querySelectorAll(".wa-item").forEach(item => {
+    item.style.display = item.textContent.toLowerCase().includes(search) ? "flex" : "none";
+  });
+}
+
+function sendSelectedWA() {
+  // Get all students with phones - SIMPLER APPROACH
+  const allWithPhone = students.filter(s => {
+    // Get phone from any possible column
+    const phone = s["Mobile"] || s["mobile"] || s["Phone"] || s["phone"] || "";
+    const clean = String(phone).replace(/\D/g, "");
+    return clean.length >= 10;
+  });
+  
+  console.log("Students with phone:", allWithPhone.length);
+  console.log("Sample:", allWithPhone[0]);
+  
+  if (allWithPhone.length === 0) {
+    alert("No students with phone numbers found!\n\nCheck console for debug info.");
+    return;
+  }
+  
+  if (!confirm(`Send WhatsApp to ${allWithPhone.length} parents?`)) {
+    return;
+  }
+  
+  closeBulkWA();
+  
+  // Build links
+  const links = allWithPhone.map(s => {
+    const name = s["Student Name"] || "Student";
+    const phoneRaw = s["Mobile"] || s["mobile"] || s["Phone"] || "";
+    const phone = String(phoneRaw).replace(/\D/g, "");
+    const fullPhone = phone.length === 10 ? "91" + phone : phone;
+    const cls = s["Class"] || "";
+    const bal = s["Balance"] || s["Bal"] || 0;
+    
+    const msg = `नमस्ते,\n\nके. डी. मेमोरियल स्कूल की ओर से सूचित किया जाता है।\n\nआपके बच्चे ${name} (कक्षा ${cls}) का शेष देनदारी Rs. ${bal} है।\n\nकृपया जल्द से जल्द बकाया राशि का भुगतान करें।\n\nधन्यवाद,\nके. डी. मेमोरियल स्कूल`;
+    
+    return {
+      name: name,
+      url: "https://wa.me/" + fullPhone + "?text=" + encodeURIComponent(msg)
+    };
+  });
+  
+  console.log("Links created:", links.length);
+  
+  // Create popup with auto-send
+  const popup = window.open("", "_blank", "width=500,height=450");
+  popup.document.write(`
+    <html><head><title>WhatsApp Auto-Sender</title>
+    <style>
+      body{font-family:Arial;padding:20px;text-align:center;background:#f5f5f5}
+      .btn{display:inline-block;padding:12px 20px;margin:8px;background:#25d366;color:white;text-decoration:none;border-radius:8px}
+      .ctrl{padding:10px 20px;margin:5px;cursor:pointer;border:none;border-radius:5px;color:white}
+      .start{background:#4f46e5}.stop{background:#ef4444}
+      #status{font-size:16px;margin:15px 0;color:#4f46e5;font-weight:bold}
+    </style>
+    </head>
+    <body>
+      <h2>📱 WhatsApp Auto-Sender</h2>
+      <p>${links.length} students with phones</p>
+      <div id="status">Ready - Click Start</div>
+      <button class="ctrl start" onclick="startAuto()">▶️ START AUTO-SEND</button>
+      <button class="ctrl stop" onclick="stopAuto()">⏹️ STOP</button>
+      <hr>
+      ${links.map(l => `<a href="${l.url}" target="_blank" class="btn" id="btn${links.indexOf(l)}">📱 ${l.name}</a>`).join("")}
+      <script>
+        var idx = 0;
+        var running = false;
+        var timer = null;
+        
+        function startAuto() {
+          if(running) return;
+          running = true;
+          idx = 0;
+          sendNext();
+        }
+        
+        function sendNext() {
+          if(!running || idx >= ${links.length}) {
+            document.getElementById('status').innerText = '✅ ALL DONE!';
+            running = false;
+            return;
+          }
+          
+          document.getElementById('status').innerText = 'Sending ' + (idx+1) + ' of ${links.length}...';
+          document.getElementById('btn'+idx).click();
+          idx++;
+          timer = setTimeout(sendNext, 2500);
+        }
+        
+        function stopAuto() {
+          running = false;
+          clearTimeout(timer);
+          document.getElementById('status').innerText = '⏹️ Stopped at ' + idx;
+        }
+      <\/script>
+    </body></html>
+  `);
+  popup.document.close();
+}
+
+// Export new functions
+
+// ============================================
+// Reports - Financial Summaries
+// ============================================
+
+async function loadReports() {
+  const tbody = document.getElementById("reports_body");
+  if (!tbody) return;
+  
+  // Calculate class-wise summary
+  const classData = {};
+  students.forEach(s => {
+    const cls = getVal(s, "CLASS") || "Unknown";
+    if (!classData[cls]) {
+      classData[cls] = { total: 0, collected: 0, pending: 0, students: 0 };
+    }
+    classData[cls].students++;
+    classData[cls].total += getNum(s, "TOTAL");
+    classData[cls].collected += getNum(s, "REC");
+    classData[cls].pending += getNum(s, "BAL");
+  });
+  
+  let html = `<table class="data-table"><thead><tr><th>Class</th><th>Students</th><th>Total Fee</th><th>Collected</th><th>Pending</th></tr></thead><tbody>`;
+  
+  Object.keys(classData).sort().forEach(cls => {
+    const d = classData[cls];
+    html += `<tr>
+      <td><strong>${cls}</strong></td>
+      <td>${d.students}</td>
+      <td>₹${d.total.toLocaleString()}</td>
+      <td style="color:green">₹${d.collected.toLocaleString()}</td>
+      <td style="color:red">₹${d.pending.toLocaleString()}</td>
+    </tr>`;
+  });
+  
+  // Add totals row
+  const totals = Object.values(classData).reduce((acc, d) => ({
+    students: acc.students + d.students,
+    total: acc.total + d.total,
+    collected: acc.collected + d.collected,
+    pending: acc.pending + d.pending
+  }), { students: 0, total: 0, collected: 0, pending: 0 });
+  
+  html += `<tr style="background:#f1f5f9; font-weight:bold;">
+    <td>TOTAL</td>
+    <td>${totals.students}</td>
+    <td>₹${totals.total.toLocaleString()}</td>
+    <td style="color:green">₹${totals.collected.toLocaleString()}</td>
+    <td style="color:red">₹${totals.pending.toLocaleString()}</td>
+  </tr></tbody></table>`;
+  
+  tbody.innerHTML = html;
+}
+
+// ============================================
+// Export to CSV
+// ============================================
+
+function exportToCSV() {
+  const headers = ["Roll No.", "Class", "Student Name", "Father Name", "Mobile", "Email", "Total", "Received", "Balance"];
+  const rows = students.map(s => [
+    getVal(s, "ROLL"),
+    getVal(s, "CLASS"),
+    getVal(s, "NAME"),
+    getVal(s, "FATHER"),
+    getVal(s, "PHONE"),
+    getVal(s, "EMAIL"),
+    getNum(s, "TOTAL"),
+    getNum(s, "REC"),
+    getNum(s, "BAL")
+  ]);
+  
+  const csvContent = [headers, ...rows].map(row => row.join(",")).join("\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `students_export_${new Date().toISOString().split('T')[0]}.csv`;
+  link.click();
+}
+
+// Export pending dues list
+function exportPendingDues() {
+  const pending = students.filter(s => getNum(s, "BAL") > 0);
+  const headers = ["Roll No.", "Class", "Student Name", "Father Name", "Mobile", "Balance"];
+  const rows = pending.map(s => [
+    getVal(s, "ROLL"),
+    getVal(s, "CLASS"),
+    getVal(s, "NAME"),
+    getVal(s, "FATHER"),
+    getVal(s, "PHONE"),
+    getNum(s, "BAL")
+  ]);
+  
+  const csvContent = [headers, ...rows].map(row => row.join(",")).join("\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `pending_dues_${new Date().toISOString().split('T')[0]}.csv`;
+  link.click();
+}
+
+// ============================================
+// Mobile Menu Functions
+// ============================================
+
+function toggleMobileMenu() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  if (sidebar && overlay) {
+    sidebar.classList.toggle('mobile-open');
+    overlay.classList.toggle('active');
+  }
+}
+
+function closeMobileMenu() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  if (sidebar && overlay) {
+    sidebar.classList.remove('mobile-open');
+    overlay.classList.remove('active');
+  }
+}
+
+// ============================================
+// Update Window Exports
+// ============================================

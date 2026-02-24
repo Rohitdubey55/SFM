@@ -20,6 +20,9 @@
 
   <div class="layout-container">
     
+    <!-- Mobile Menu Overlay -->
+    <div id="sidebarOverlay" class="sidebar-overlay" onclick="closeMobileMenu()"></div>
+    
     <!-- Sidebar -->
     <aside class="sidebar">
       <div class="logo-area">
@@ -71,17 +74,23 @@
     <main class="main-content">
       
       <header class="top-header">
+         <button class="hamburger" onclick="toggleMobileMenu()">
+           <span class="material-icons-round">menu</span>
+         </button>
          <div class="header-titles">
            <h2 id="pageTitle">Dashboard</h2>
          </div>
          
-         <div class="header-actions" style="display:flex; gap:16px;">
+         <div class="header-actions" style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
             <div class="search-bar">
               <span class="material-icons-round" style="color:#94a3b8">search</span>
-              <input type="text" id="searchInput" placeholder="Search student, roll number...">
+              <input type="text" id="searchInput" placeholder="Search...">
             </div>
+            <button onclick="sendBulkWA()" class="btn-whatsapp" title="Send Bulk WhatsApp">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.711 2.592 2.654-.696c1.029.66 2.028.938 3.267.938 3.188 0 5.768-2.587 5.768-5.771.001-3.185-2.58-5.767-5.769-5.767zm0 10.198c-1.125 0-2.062-.271-2.923-.746l-1.399.367.373-1.359c-.538-.857-.822-1.637-.821-2.693.001-2.441 1.987-4.428 4.428-4.428 2.443 0 4.43 1.986 4.43 4.427 0 2.442-1.985 4.43 4.432z"/></svg>
+            </button>
             <button onclick="openModal('NEW')" class="btn-primary">
-              <span class="material-icons-round">add</span> Add Student
+              <span class="material-icons-round">add</span> <span class="btn-text">Add</span>
             </button>
          </div>
       </header>
@@ -217,7 +226,10 @@
 
       <!-- Staff View -->
       <div id="view-staff" class="view-section">
-          <h2>Staff Management</h2>
+          <div class="header-actions" style="margin-bottom:20px;">
+            <h2>Staff Management</h2>
+            <button class="btn-primary" onclick="openStaffModal('NEW')">Add Staff</button>
+          </div>
           <div class="table-container">
             <table class="data-table">
               <thead><tr><th>Name</th><th>Role</th><th>Salary</th><th>Advance Taken</th><th>Action</th></tr></thead>
@@ -244,6 +256,11 @@
            <div class="input-group full"><label>Student Name</label><input type="text" id="inpName" required></div>
            <div class="input-group full"><label>Father Name</label><input type="text" id="inpFather"></div>
            <div class="input-group full"><label>Mobile No</label><input type="number" id="inpPhone" placeholder="9876543210"></div>
+            <div class="input-group"><label>Email</label><input type="email" id="inpEmail" placeholder="email@example.com"></div>
+            <div class="input-group"><label>Date of Birth</label><input type="date" id="inpDOB"></div>
+            <div class="input-group full"><label>Address</label><input type="text" id="inpAddress" placeholder="Full address"></div>
+            <div class="input-group"><label>Van Route</label><input type="text" id="inpRoute" placeholder="Route-1"></div>
+            <div class="input-group"><label>Pickup Point</label><input type="text" id="inpPickup" placeholder="Main Gate"></div>
            
            <div class="divider full" style="margin-top:10px; border-bottom:1px solid #e2e8f0; padding-bottom:5px; margin-bottom:10px; color:#94a3b8; font-size:0.75rem; font-weight:700;">FEE STRUCTURE</div>
            <div class="input-group"><label>Tuition Fee</label><input type="number" id="inpTuition" value="0"></div>
@@ -301,15 +318,36 @@
   <!-- Expense Modal -->
   <div id="expModal" class="modal-overlay">
       <div class="modal" style="height:auto;">
-        <div class="modal-header"><h2>New Expense</h2><button onclick="document.getElementById('expModal').style.display='none'" class="close-btn">&times;</button></div>
+        <div class="modal-header"><h2 id="expModalTitle">New Expense</h2><button onclick="document.getElementById('expModal').style.display='none'" class="close-btn">&times;</button></div>
         <div class="form-grid">
+           <input type="hidden" id="expId">
            <div class="input-group"><label>Category</label>
              <select id="exp_cat" style="width:100%; padding:10px;"><option>Transport</option><option>Office</option><option>Maintenance</option><option>Salary</option><option>Other</option></select>
            </div>
            <div class="input-group"><label>Amount</label><input type="number" id="exp_amt"></div>
            <div class="input-group full"><label>Description</label><input type="text" id="exp_desc"></div>
         </div>
-        <div class="modal-footer"><button class="btn-primary" onclick="submitExp()">Save Expense</button></div>
+        <div class="modal-footer">
+           <button type="button" id="expDeleteBtn" onclick="deleteExpense()" class="btn-danger" style="display:none;">Delete</button>
+           <button class="btn-primary" onclick="submitExp()">Save Expense</button>
+        </div>
+      </div>
+    </div>
+
+  <!-- Staff Modal -->
+  <div id="staffModal" class="modal-overlay">
+      <div class="modal" style="height:auto;">
+        <div class="modal-header"><h2 id="staffModalTitle">Add Staff</h2><button onclick="document.getElementById('staffModal').style.display='none'" class="close-btn">&times;</button></div>
+        <div class="form-grid">
+           <input type="hidden" id="staffId">
+           <div class="input-group full"><label>Name</label><input type="text" id="staff_name"></div>
+           <div class="input-group"><label>Role</label><input type="text" id="staff_role"></div>
+           <div class="input-group"><label>Salary</label><input type="number" id="staff_salary"></div>
+        </div>
+        <div class="modal-footer">
+           <button type="button" id="staffDeleteBtn" onclick="deleteStaff()" class="btn-danger" style="display:none;">Delete</button>
+           <button class="btn-primary" onclick="submitStaff()">Save Staff</button>
+        </div>
       </div>
     </div>
 
@@ -366,6 +404,28 @@
 
   <!-- Print Area -->
   <div id="printArea" style="display:none;"></div>
+
+  <!-- Bulk WhatsApp Selection Modal -->
+  <div id="bulkWAModal" class="modal-overlay">
+    <div class="modal" style="max-height:80vh;">
+      <div class="modal-header">
+        <h2>Send Bulk WhatsApp</h2>
+        <button onclick="closeBulkWA()" class="close-btn"><span class="material-icons-round">close</span></button>
+      </div>
+      <div style="padding:16px; border-bottom:1px solid var(--border);">
+        <div style="display:flex; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
+          <button class="btn-primary" onclick="selectAllWA()" style="font-size:0.8rem;">Select All</button>
+          <button class="btn-sec" onclick="deselectAllWA()" style="font-size:0.8rem;">Deselect All</button>
+          <button class="btn-primary" style="background:#10b981; font-size:0.8rem;" onclick="sendSelectedWA()">
+            <span class="material-icons-round" style="font-size:16px;">send</span> Send (<span id="waSelectedCount">0</span>)
+          </button>
+        </div>
+        <input type="text" id="waSearch" placeholder="Search students..." onkeyup="filterWASelection()" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:8px;">
+      </div>
+      <div id="waSelectionList" style="flex:1; overflow-y:auto; padding:10px; max-height:400px;">
+      </div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>
