@@ -3,7 +3,7 @@
 // ============================================
 
 // CONFIG: Your Google Apps Script Web App URL
-const GAS_API_URL = "https://script.google.com/macros/s/AKfycbxeKgAVnYTmcnf6pKtVZ8NcU1g8EMJx1X3Nsi86GaP15Ncu6rWXvzmmKvoq0b6Azr-j3w/exec";
+const GAS_API_URL = "https://script.google.com/macros/s/AKfycbxnaSTYPb8mvpo-OGN01fM_at35RRfzquYq2d7D3ANcYZ4CQeIdLjgGC9KiQ3n6zfflaw/exec";
 
 // Sheet names
 const SHEETS = {
